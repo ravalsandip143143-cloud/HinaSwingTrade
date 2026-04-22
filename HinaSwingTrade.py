@@ -2,26 +2,61 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import requests
-import pyotp
 import time
-from SmartApi import SmartConnect
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Hina Swing Trade AI", layout="wide")
 
-# --- SECRETS (100% SECURE - GitHub par keys nahi dikhengi) ---
+# --- SECRETS (Ab sirf Telegram chahiye) ---
 try:
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
     CHAT_ID = st.secrets["CHAT_ID"]
-    ANGEL_API_KEY = st.secrets["ANGEL_API_KEY"]
-    CLIENT_ID = st.secrets["CLIENT_ID"]
-    PIN = st.secrets["PIN"]
-    TOTP_SEED = st.secrets["TOTP_SEED"]
 except:
-    st.warning("⚠️ Security Alert: Streamlit Secrets set nahi hain. Streamlit Dashboard me jaakar Secrets daalein.")
+    st.warning("⚠️ Security Alert: Streamlit Secrets mein Telegram Token aur Chat ID set nahi hain.")
     st.stop()
 
-WATCHLIST_FILE = "HinaSwingTrade.txt" # Tumhari .txt file ka naam
+WATCHLIST_FILE = "HinaSwingTrade.txt"
+
+# --- 1. LIVE CLOCK (Top Right Corner) ---
+clock_widget = """
+<div id="clock" style="
+    position: fixed;
+    top: 15px;
+    right: 20px;
+    background-color: #1E1E1E;
+    color: #00FF00;
+    padding: 8px 15px;
+    border-radius: 8px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 16px;
+    font-weight: bold;
+    z-index: 99999;
+    box-shadow: 0px 4px 6px rgba(0,0,0,0.5);
+    border: 1px solid #00FF00;
+"></div>
+<script>
+    function updateTime() {
+        var now = new Date();
+        var timeString = now.toLocaleDateString('en-IN') + ' | ' + now.toLocaleTimeString('en-IN', { hour12: true });
+        document.getElementById('clock').innerHTML = '🕒 ' + timeString;
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+</script>
+"""
+st.markdown(clock_widget, unsafe_allow_html=True)
+
+# --- 2. SIDEBAR NOTEPAD ---
+st.sidebar.title("🛠️ Tools Menu")
+st.sidebar.markdown("---")
+st.sidebar.subheader("📝 Personal Notepad")
+
+# Notepad ko session state me save rakhne ke liye
+if 'notepad_text' not in st.session_state:
+    st.session_state['notepad_text'] = ""
+
+notes = st.sidebar.text_area("Yahan notes likhein (Niche se khinch kar bada karein):", value=st.session_state['notepad_text'], height=250)
+st.session_state['notepad_text'] = notes
 
 # --- SECTOR INDICES ---
 SECTORS = {
@@ -50,16 +85,6 @@ def get_stock_index(ticker):
     elif t in metal: return "Nifty Metal"
     elif t in fmcg: return "Nifty FMCG"
     else: return "Nifty 50/Mid"
-
-def smart_login():
-    """Angel One Automatic Login using Secrets"""
-    try:
-        smartApi = SmartConnect(api_key=ANGEL_API_KEY)
-        totp = pyotp.TOTP(TOTP_SEED).now()
-        login_data = smartApi.generateSession(CLIENT_ID, PIN, totp)
-        if login_data['status']: return True
-        return False
-    except: return False
 
 def analyze_stock(ticker):
     try:
@@ -104,20 +129,12 @@ def analyze_stock(ticker):
     except Exception as e: 
         return None
 
-# --- STREAMLIT DASHBOARD UI ---
+# --- MAIN DASHBOARD ---
 st.title("🚀 Hina Swing Trade - AI Terminal")
-
-# 1. Angel One Auto-Login check
-with st.spinner("Connecting to Angel One (Smart API)..."):
-    if smart_login(): 
-        st.success("✅ Angel One API Connected Successfully!")
-    else: 
-        st.error("⚠️ Angel One Connection Failed! Please check your credentials in Streamlit Secrets.")
 
 st.markdown("---")
 st.subheader("📊 Sectoral Indices Heatmap (Live)")
 
-# 2. Sector Heatmap display
 tickers = list(SECTORS.keys())
 data = yf.download(tickers, period="2d", interval="1d", progress=False)['Close']
 cols = st.columns(len(SECTORS))
@@ -133,33 +150,53 @@ for i, (ticker, name) in enumerate(SECTORS.items()):
 
 st.markdown("---")
 
-# 3. Market Scan Button & Table
-if st.button("🔄 Start Market Scan (Triveni Strategy)"):
+# --- 3. AUTO-SCAN & MANUAL SCAN LOGIC ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Scan Settings")
+
+# Query params se state maintain karna (taaki refresh ke baad setting na ude)
+params = st.query_params
+default_auto = True if params.get("auto") == "true" else False
+
+auto_refresh = st.sidebar.checkbox("⏰ Auto-Scan Mode (Har 1 ghante mein chalega)", value=default_auto)
+
+start_scan = False
+
+if auto_refresh:
+    st.query_params["auto"] = "true"
+    # JS Meta tag jo page ko har 3600 second (1 hour) mein refresh karega
+    st.markdown("<meta http-equiv='refresh' content='3600'>", unsafe_allow_html=True)
+    st.info("⏰ Auto-Scan Mode ON: Tool khud har 1 ghante mein scan karke Telegram alert bhejega. (Browser tab khula rakhein)")
+    start_scan = True  # Page load hote hi khud scan chalu ho jayega
+else:
+    if "auto" in st.query_params:
+        del st.query_params["auto"]
+    # Agar Auto-mode band hai, toh normal Manual button dikhega
+    start_scan = st.button("🔄 Start Market Scan (Manual)")
+
+# --- MARKET SCANNER ---
+if start_scan:
     try:
         with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
             stocks = f.read().splitlines()
         
         st.info(f"📂 Analyzing {len(stocks)} stocks... Please wait.")
-        
         progress_bar = st.progress(0)
         results = []
         
         for i, s in enumerate(stocks):
             s = s.strip()
             if s:
-                # Stock code check
                 ticker = s if s.endswith(".NS") else f"{s}.NS"
                 res = analyze_stock(ticker)
                 if res: results.append(res)
             
-            # Progress bar update
             progress_bar.progress((i + 1) / len(stocks))
             time.sleep(0.05) 
         
         if results:
             df_results = pd.DataFrame(results)
             st.subheader("📈 Trading Signals (Live)")
-            # Streamlit Interactive Table
             st.dataframe(df_results, use_container_width=True)
             st.success("✅ Analysis Complete!")
         else:
