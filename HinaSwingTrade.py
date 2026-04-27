@@ -7,10 +7,11 @@ import time
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Hina Swing Trade AI", layout="wide")
 
-# --- SECRETS (Ab sirf Telegram chahiye) ---
+# --- SECRETS (Telegram Credentials) ---
 try:
-    BOT_TOKEN = st.secrets["BOT_TOKEN"]
-    CHAT_ID = st.secrets["CHAT_ID"]
+    # .strip() lagaya hai taaki koi galti se space aa jaye toh wo hat jaye
+    BOT_TOKEN = str(st.secrets["BOT_TOKEN"]).strip()
+    CHAT_ID = str(st.secrets["CHAT_ID"]).strip()
 except:
     st.warning("⚠️ Security Alert: Streamlit Secrets mein Telegram Token aur Chat ID set nahi hain.")
     st.stop()
@@ -51,15 +52,15 @@ st.sidebar.title("🛠️ Tools Menu")
 st.sidebar.markdown("---")
 st.sidebar.subheader("📝 Personal Notepad")
 
-# Notepad ko session state me save rakhne ke liye
 if 'notepad_text' not in st.session_state:
     st.session_state['notepad_text'] = ""
 
 notes = st.sidebar.text_area("Yahan notes likhein (Niche se khinch kar bada karein):", value=st.session_state['notepad_text'], height=250)
 st.session_state['notepad_text'] = notes
 
-# --- SECTOR INDICES ---
+# --- SECTOR INDICES (Nifty 50 Added) ---
 SECTORS = {
+    "^NSEI": "NIFTY 50",
     "^NSEBANK": "NIFTY BANK",
     "^CNXFMCG": "NIFTY FMCG",
     "^CNXIT": "NIFTY IT",
@@ -69,9 +70,14 @@ SECTORS = {
 }
 
 def send_telegram_msg(message):
+    """Fixed Telegram Notification Logic"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    try: requests.post(url, data={"chat_id": CHAT_ID, "text": message})
-    except: pass
+    payload = {"chat_id": CHAT_ID, "text": message}
+    try: 
+        # Using json=payload ensures proper format processing by Telegram
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e: 
+        pass
 
 def get_stock_index(ticker):
     bank = ['HDFCBANK', 'ICICIBANK', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'INDUSINDBK', 'BANKBARODA', 'PNB', 'FEDERALBNK', 'AUBANK', 'CANBK']
@@ -129,6 +135,18 @@ def analyze_stock(ticker):
     except Exception as e: 
         return None
 
+# --- Custom Styling Function for Pandas ---
+def highlight_signal(val):
+    """Background Color Logic"""
+    if isinstance(val, str):
+        if 'BUY' in val:
+            return 'background-color: #A9DFBF; color: black; font-weight: bold;' # Light Green
+        elif 'SELL' in val:
+            return 'background-color: #F5B7B1; color: black; font-weight: bold;' # Light Red
+        elif 'HOLD' in val:
+            return 'background-color: #E5E7E9; color: black; font-weight: bold;' # Light Gray
+    return ''
+
 # --- MAIN DASHBOARD ---
 st.title("🚀 Hina Swing Trade - AI Terminal")
 
@@ -137,7 +155,7 @@ st.subheader("📊 Sectoral Indices Heatmap (Live)")
 
 tickers = list(SECTORS.keys())
 data = yf.download(tickers, period="2d", interval="1d", progress=False)['Close']
-cols = st.columns(len(SECTORS))
+cols = st.columns(len(SECTORS)) # Automatically creates equal columns in a line
 
 for i, (ticker, name) in enumerate(SECTORS.items()):
     try:
@@ -150,11 +168,10 @@ for i, (ticker, name) in enumerate(SECTORS.items()):
 
 st.markdown("---")
 
-# --- 3. AUTO-SCAN & MANUAL SCAN LOGIC ---
+# --- AUTO-SCAN & MANUAL SCAN LOGIC ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Scan Settings")
 
-# Query params se state maintain karna (taaki refresh ke baad setting na ude)
 params = st.query_params
 default_auto = True if params.get("auto") == "true" else False
 
@@ -164,14 +181,12 @@ start_scan = False
 
 if auto_refresh:
     st.query_params["auto"] = "true"
-    # JS Meta tag jo page ko har 3600 second (1 hour) mein refresh karega
     st.markdown("<meta http-equiv='refresh' content='3600'>", unsafe_allow_html=True)
     st.info("⏰ Auto-Scan Mode ON: Tool khud har 1 ghante mein scan karke Telegram alert bhejega. (Browser tab khula rakhein)")
-    start_scan = True  # Page load hote hi khud scan chalu ho jayega
+    start_scan = True 
 else:
     if "auto" in st.query_params:
         del st.query_params["auto"]
-    # Agar Auto-mode band hai, toh normal Manual button dikhega
     start_scan = st.button("🔄 Start Market Scan (Manual)")
 
 # --- MARKET SCANNER ---
@@ -196,8 +211,26 @@ if start_scan:
         
         if results:
             df_results = pd.DataFrame(results)
+            
+            # --- SORTING LOGIC: BUY on Top ---
+            def get_sort_value(signal):
+                if 'BUY' in signal: return 0
+                elif 'HOLD' in signal: return 1
+                elif 'SELL' in signal: return 2
+                return 3
+            
+            df_results['sort_order'] = df_results['SIGNAL'].apply(get_sort_value)
+            df_results = df_results.sort_values(by='sort_order').drop(columns=['sort_order']).reset_index(drop=True)
+            
+            # --- APPLYING COLORS ---
+            try:
+                styled_df = df_results.style.map(highlight_signal, subset=['SIGNAL'])
+            except AttributeError:
+                # Fallback for older Pandas versions
+                styled_df = df_results.style.applymap(highlight_signal, subset=['SIGNAL'])
+                
             st.subheader("📈 Trading Signals (Live)")
-            st.dataframe(df_results, use_container_width=True)
+            st.dataframe(styled_df, use_container_width=True)
             st.success("✅ Analysis Complete!")
         else:
             st.warning("⚠️ Koi valid data nahi mila. Watchlist check karein.")
