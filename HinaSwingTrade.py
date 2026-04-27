@@ -289,7 +289,7 @@ if start_scan:
             
             # --- APPLY STYLING HERE before displaying ---
             # Apply color style function specifically to SIGNAL column cells
-            styled_df = df_results.style.applymap(color_signal, subset=['SIGNAL'])
+            styled_df = df_results.style.map(color_signal, subset=['SIGNAL'])
             
             # Pass the STYLED dataframe to Streamlit
             st.dataframe(styled_df, use_container_width=True)
