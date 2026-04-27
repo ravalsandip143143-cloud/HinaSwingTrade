@@ -3,12 +3,12 @@ import yfinance as yf
 import pandas as pd
 import requests
 import time
-import numpy as np # Robust NaN handling for yfinance multi-index
+import numpy as np
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Hina Swing Trade AI", layout="wide")
 
-# --- SECRETS (Ab sirf Telegram chahiye) ---
+# --- SECRETS (Telegram) ---
 try:
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
     CHAT_ID = st.secrets["CHAT_ID"]
@@ -18,44 +18,33 @@ except:
 
 WATCHLIST_FILE = "HinaSwingTrade.txt"
 
-# --- HELPER FUNCTIONS FOR ROBUST DATA ACCESS (yfinance multi-index fixes) ---
+# --- HELPER FUNCTIONS FOR ROBUST DATA ACCESS ---
 def get_safe_series(df, col_name):
-    """Safely gets a single Series from a potentially MultiIndex yfinance DataFrame."""
     try:
-        # Standard yfinance format: df[('Close', 'Ticker')] or flattened df['Close']
         if col_name in df.columns:
             return df[col_name]
-        
-        # If columns are MultiIndex, get only the data level Series (ignoring Ticker index)
         if isinstance(df.columns, pd.MultiIndex):
             if df.columns.nlevels > 1:
-                return df.xs(col_name, level=0, axis=1) # XS gets cross-section, often a DF but hopefully with 1 column if downloaded only 1 ticker
-        
-        # Fallback if nothing else works, though less safe
+                return df.xs(col_name, level=0, axis=1)
         if col_name in df.columns.get_level_values(0):
             return df[col_name]
     except Exception as e:
-        st.error(f"Error accessing column {col_name}: {e}")
+        pass
     return pd.Series(dtype=float)
 
 def get_latest_float(series):
-    """Safely extracts the last valid float value from a Series or Series-like object."""
     try:
         if isinstance(series, pd.DataFrame):
-            # If multi-index somehow persisted, get first column
             series = series.iloc[:, 0]
-        
         if series.empty:
             return np.nan
-
-        # Get last value (handle series vs single value iloc return)
         val = series.iloc[-1]
         if isinstance(val, pd.Series):
              return float(val.iloc[0])
         else:
              return float(val)
     except Exception as e:
-        return np.nan # Graceful error handling for missing data
+        return np.nan 
 
 # --- 1. LIVE CLOCK (Top Right Corner) ---
 clock_widget = """
@@ -91,7 +80,6 @@ st.sidebar.title("🛠️ Tools Menu")
 st.sidebar.markdown("---")
 st.sidebar.subheader("📝 Personal Notepad")
 
-# Notepad ko session state me save rakhne ke liye
 if 'notepad_text' not in st.session_state:
     st.session_state['notepad_text'] = ""
 
@@ -126,41 +114,33 @@ def get_stock_index(ticker):
     elif t in fmcg: return "Nifty FMCG"
     else: return "Nifty 50/Mid"
 
-# --- 4. SIGNAL STYLING FUNCTION (LITE HOLD FIX) ---
+# --- 4. SIGNAL STYLING FUNCTION ---
 def color_signal(val):
-    """styles the SIGNAL column cell background."""
     background_style = ''
     text_style = ''
     
     if val == '✅ BUY':
-        # Green background with some opacity
         background_style = 'background-color: rgba(30, 255, 30, 0.6);' 
-        text_style = 'color: white;' # White text for contrast
+        text_style = 'color: white;' 
     elif val == '❌ SELL':
-        # Red background with some opacity
         background_style = 'background-color: rgba(255, 30, 30, 0.6);' 
-        text_style = 'color: white;' # White text for contrast
+        text_style = 'color: white;' 
     elif val == '⏳ HOLD':
-        # CURRENT FIX: VERY lite background (approx 15% opacity amber/orange)
         background_style = 'background-color: rgba(255, 165, 0, 0.15);' 
-        # Optional: Set a specific text color to keep it orange
-        text_style = 'color: #FFA500;' # Distinct Orange text
+        text_style = 'color: #FFA500;' 
         
     return f"{background_style} {text_style}"
 
 def analyze_stock(ticker):
     try:
-        # SINGLE ticker download for robustness
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty or len(df) < 75: return None
 
-        # Robust access fixes for analyze_stock (fixes yfinance multi-index errors)
         close_series = get_safe_series(df, 'Close')
         volume_series = get_safe_series(df, 'Volume')
         low_series = get_safe_series(df, 'Low')
         high_series = get_safe_series(df, 'High')
 
-        # Recalculating all based on standardized safe Series
         ema9_series = close_series.ewm(span=9, adjust=False).mean()
         ema20_series = close_series.ewm(span=20, adjust=False).mean()
         ema75_series = close_series.ewm(span=75, adjust=False).mean()
@@ -168,7 +148,6 @@ def analyze_stock(ticker):
         supp_series = low_series.rolling(window=15).min()
         res_series = high_series.rolling(window=15).max()
 
-        # Extract last valid valid floats safely
         close = get_latest_float(close_series)
         e9 = get_latest_float(ema9_series)
         e20 = get_latest_float(ema20_series)
@@ -177,9 +156,8 @@ def analyze_stock(ticker):
         vol_today = get_latest_float(volume_series)
         vol_avg = get_latest_float(vol_avg_series)
         
-        # Safe float checks
         if np.isnan(close) or np.isnan(e20) or np.isnan(e75):
-            return None # Missing core data
+            return None 
             
         vol_x = (vol_today / vol_avg) if (vol_avg > 0 and not np.isnan(vol_avg)) else 0
         supp = get_latest_float(supp_series)
@@ -216,22 +194,17 @@ cols = st.columns(len(SECTORS))
 
 for i, (ticker, name) in enumerate(SECTORS.items()):
     try:
-        # Robust access fixes for Sector Heatmap (fixes yfinance multi-index errors)
-        # Sector indices download often returns multi-index DF for Close
         ticker_data = data[ticker] if ticker in data.columns else None
-        
-        # Robust retrieval of close prices
         if ticker_data is not None and isinstance(ticker_data, pd.Series):
              today_close = float(ticker_data.iloc[-1])
              yest_close = float(ticker_data.iloc[-2])
         elif ticker_data is not None and isinstance(ticker_data, pd.DataFrame):
-             today_close = float(ticker_data.iloc[-1].iloc[0]) # Get first ticker close if multi-index somehow persisted
+             today_close = float(ticker_data.iloc[-1].iloc[0]) 
              yest_close = float(ticker_data.iloc[-2].iloc[0])
         else:
              cols[i].metric(label=name, value="Error", delta=None)
              continue
         
-        # Change Calculation
         change_pct = ((today_close - yest_close) / yest_close) * 100 if yest_close > 0 else 0
         cols[i].metric(label=name, value=f"{today_close:.2f}", delta=f"{change_pct:.2f}%")
     except:
@@ -243,7 +216,6 @@ st.markdown("---")
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Scan Settings")
 
-# Query params se state maintain karna (taaki refresh ke baad setting na ude)
 params = st.query_params
 default_auto = True if params.get("auto") == "true" else False
 
@@ -253,14 +225,12 @@ start_scan = False
 
 if auto_refresh:
     st.query_params["auto"] = "true"
-    # JS Meta tag jo page ko har 3600 second (1 hour) mein refresh karega
     st.markdown("<meta http-equiv='refresh' content='3600'>", unsafe_allow_html=True)
     st.info("⏰ Auto-Scan Mode ON: Tool khud har 1 ghante mein scan karke Telegram alert bhejega. (Browser tab khula rakhein)")
-    start_scan = True  # Page load hote hi khud scan chalu ho jayega
+    start_scan = True  
 else:
     if "auto" in st.query_params:
         del st.query_params["auto"]
-    # Agar Auto-mode band hai, toh normal Manual button dikhega
     start_scan = st.button("🔄 Start Market Scan (Manual)")
 
 # --- MARKET SCANNER ---
@@ -281,21 +251,18 @@ if start_scan:
                 if res: results.append(res)
             
             progress_bar.progress((i + 1) / len(stocks))
-            # time.sleep(0.05) # No need for sleep on single downloads if API limits allow, keep off for performance
         
-             if results:
+        if results:
             df_results = pd.DataFrame(results)
             st.subheader("📈 Trading Signals (Live)")
             
-            # --- SORTING LOGIC (BUY सबसे ऊपर आएगा) ---
+            # --- SORTING LOGIC: BUY 1st, SELL 2nd, HOLD 3rd ---
             sort_order = {"✅ BUY": 1, "❌ SELL": 2, "⏳ HOLD": 3}
             df_results['Sort'] = df_results['SIGNAL'].map(sort_order)
             df_results = df_results.sort_values('Sort').drop('Sort', axis=1).reset_index(drop=True)
             
-            # --- APPLY STYLING HERE before displaying ---
-            # Apply color style function specifically to SIGNAL column cells
-            styled_df = df_results.style.format(precision=2).map(color_signal, subset=['SIGNAL']) 
-            # Pass the STYLED dataframe to Streamlit
+            # --- APPLY STYLING & PRECISION ---
+            styled_df = df_results.style.format(precision=2).map(color_signal, subset=['SIGNAL'])
             st.dataframe(styled_df, use_container_width=True)
             
             st.success("✅ Analysis Complete!")
