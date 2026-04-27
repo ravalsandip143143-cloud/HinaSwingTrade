@@ -283,9 +283,14 @@ if start_scan:
             progress_bar.progress((i + 1) / len(stocks))
             # time.sleep(0.05) # No need for sleep on single downloads if API limits allow, keep off for performance
         
-        if results:
+             if results:
             df_results = pd.DataFrame(results)
             st.subheader("📈 Trading Signals (Live)")
+            
+            # --- SORTING LOGIC (BUY सबसे ऊपर आएगा) ---
+            sort_order = {"✅ BUY": 1, "❌ SELL": 2, "⏳ HOLD": 3}
+            df_results['Sort'] = df_results['SIGNAL'].map(sort_order)
+            df_results = df_results.sort_values('Sort').drop('Sort', axis=1).reset_index(drop=True)
             
             # --- APPLY STYLING HERE before displaying ---
             # Apply color style function specifically to SIGNAL column cells
