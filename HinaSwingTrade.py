@@ -89,7 +89,7 @@ st.session_state['notepad_text'] = notes
 # --- SECTOR INDICES ---
 SECTORS = {
     "^NSEBANK": "NIFTY BANK",
-    "^NSENIFTY50": "NIFTY 50",
+    "^NSENIFTY": "NIFTY 50",
     "^CNXFMCG": "NIFTY FMCG",
     "^CNXIT": "NIFTY IT",
     "^CNXMETAL": "NIFTY METAL",
