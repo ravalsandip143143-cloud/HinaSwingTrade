@@ -4,6 +4,9 @@ import pandas as pd
 import requests
 import time
 import numpy as np
+# --- STRATEGY 2 NEW IMPORTS ---
+import pandas_ta as ta
+import datetime
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Hina Swing Trade AI", layout="wide")
@@ -115,7 +118,7 @@ def get_stock_index(ticker):
     elif t in fmcg: return "Nifty FMCG"
     else: return "Nifty 50/Mid"
 
-# --- 4. SIGNAL STYLING FUNCTION ---
+# --- 4. SIGNAL STYLING FUNCTION (Original) ---
 def color_signal(val):
     background_style = ''
     text_style = ''
@@ -183,91 +186,247 @@ def analyze_stock(ticker):
     except Exception as e: 
         return None
 
-# --- MAIN DASHBOARD ---
+# ==============================================================================
+# --- NEW: STRATEGY 2 HELPER FUNCTIONS (50 & 200 EMA CROSSOVER) ---
+# ==============================================================================
+def analyze_stock_ema(symbol, timeframe):
+    try:
+        if timeframe == "1 Day":
+            interval = "1d"
+            period = "6mo"
+        else:
+            interval = "1h"
+            period = "730d"
+
+        ticker = yf.Ticker(f"{symbol}.NS")
+        df = ticker.history(period=period, interval=interval)
+        
+        if df.empty or len(df) < 200:
+            return None
+            
+        if timeframe == "4 Hrs":
+            df = df.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
+
+        df['EMA_50'] = ta.ema(df['Close'], length=50)
+        df['EMA_200'] = ta.ema(df['Close'], length=200)
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['RSI_MA'] = ta.sma(df['RSI'], length=14)
+        
+        df.ta.vwap(append=True)
+        vwap_col = [col for col in df.columns if 'VWAP' in col][0]
+
+        df = df.dropna()
+        if len(df) < 6: 
+            return None
+
+        recent_data = df.tail(6)
+        crossover_happened = False
+        for i in range(1, len(recent_data)):
+            prev = recent_data.iloc[i-1]
+            curr = recent_data.iloc[i]
+            if prev['EMA_50'] <= prev['EMA_200'] and curr['EMA_50'] > curr['EMA_200']:
+                crossover_happened = True
+                break
+
+        current_candle = df.iloc[-1]
+        is_currently_bullish = current_candle['EMA_50'] > current_candle['EMA_200']
+
+        if crossover_happened and is_currently_bullish:
+            last_30_days = df.tail(30)
+            avg_volume = last_30_days['Volume'].mean()
+            current_volume = current_candle['Volume']
+            vol_multiplier = current_volume / avg_volume if avg_volume > 0 else 0
+            vol_text = f"{vol_multiplier:.1f}x Avg"
+
+            sector = ticker.info.get('sector', 'Unknown')
+
+            return {
+                "Sector": sector,
+                "Current Price": round(current_candle['Close'], 2),
+                "50 EMA": round(current_candle['EMA_50'], 2),
+                "200 EMA": round(current_candle['EMA_200'], 2),
+                "RSI": round(current_candle['RSI'], 2),
+                "RSI MA": round(current_candle['RSI_MA'], 2),
+                "VWAP": round(current_candle[vwap_col], 2),
+                "Volume": vol_text,
+                "Action": "BUY"
+            }
+    except Exception as e:
+        return None
+    return None
+
+def load_watchlist_ema(filename="pinshutrade.txt"):
+    try:
+        with open(filename, "r") as f:
+            return [line.strip() for line in f if line.strip()]
+    except FileNotFoundError:
+        st.error(f"Error: '{filename}' file nahi mili. Dhyan rahe ye GitHub repo me ho.")
+        return []
+
+def highlight_table_ema(val):
+    if val == "BUY":
+        return 'background-color: rgba(0, 255, 0, 0.3); color: white; font-weight: bold'
+    elif isinstance(val, (int, float)):
+         return 'color: #D3D3D3;'
+    return ''
+# ==============================================================================
+
+
+# --- MAIN DASHBOARD (COMBINED WITH TABS) ---
 st.title("🚀 Hina Swing Trade - AI Terminal")
 
-st.markdown("---")
-st.subheader("📊 Sectoral Indices Heatmap (Live)")
+# Creating Tabs for both strategies
+tab1, tab2 = st.tabs(["🚀 Hina Swing Strategy (Original)", "📈 50 & 200 EMA Crossover (Pinshu)"])
 
-tickers = list(SECTORS.keys())
-data = yf.download(tickers, period="2d", interval="1d", progress=False)['Close']
-cols = st.columns(len(SECTORS))
 
-for i, (ticker, name) in enumerate(SECTORS.items()):
-    try:
-        ticker_data = data[ticker] if ticker in data.columns else None
-        if ticker_data is not None and isinstance(ticker_data, pd.Series):
-             today_close = float(ticker_data.iloc[-1])
-             yest_close = float(ticker_data.iloc[-2])
-        elif ticker_data is not None and isinstance(ticker_data, pd.DataFrame):
-             today_close = float(ticker_data.iloc[-1].iloc[0]) 
-             yest_close = float(ticker_data.iloc[-2].iloc[0])
+# --- TAB 1: ORIGINAL HINA STRATEGY ---
+with tab1:
+    st.markdown("---")
+    st.subheader("📊 Sectoral Indices Heatmap (Live)")
+
+    tickers = list(SECTORS.keys())
+    data = yf.download(tickers, period="2d", interval="1d", progress=False)['Close']
+    cols = st.columns(len(SECTORS))
+
+    for i, (ticker, name) in enumerate(SECTORS.items()):
+        try:
+            ticker_data = data[ticker] if ticker in data.columns else None
+            if ticker_data is not None and isinstance(ticker_data, pd.Series):
+                 today_close = float(ticker_data.iloc[-1])
+                 yest_close = float(ticker_data.iloc[-2])
+            elif ticker_data is not None and isinstance(ticker_data, pd.DataFrame):
+                 today_close = float(ticker_data.iloc[-1].iloc[0]) 
+                 yest_close = float(ticker_data.iloc[-2].iloc[0])
+            else:
+                 cols[i].metric(label=name, value="Error", delta=None)
+                 continue
+            
+            change_pct = ((today_close - yest_close) / yest_close) * 100 if yest_close > 0 else 0
+            cols[i].metric(label=name, value=f"{today_close:.2f}", delta=f"{change_pct:.2f}%")
+        except:
+            cols[i].metric(label=name, value="Error", delta=None)
+
+    st.markdown("---")
+
+    # --- AUTO-SCAN & MANUAL SCAN LOGIC (Original) ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Scan Settings (Hina Strategy)")
+
+    params = st.query_params
+    default_auto = True if params.get("auto") == "true" else False
+
+    auto_refresh = st.sidebar.checkbox("⏰ Auto-Scan Mode (Har 1 ghante mein chalega)", value=default_auto)
+
+    start_scan = False
+
+    if auto_refresh:
+        st.query_params["auto"] = "true"
+        st.markdown("<meta http-equiv='refresh' content='3600'>", unsafe_allow_html=True)
+        st.info("⏰ Auto-Scan Mode ON: Tool khud har 1 ghante mein scan karke Telegram alert bhejega. (Browser tab khula rakhein)")
+        start_scan = True  
+    else:
+        if "auto" in st.query_params:
+            del st.query_params["auto"]
+        start_scan = st.button("🔄 Start Market Scan (Manual)")
+
+    # --- MARKET SCANNER (Original) ---
+    if start_scan:
+        try:
+            with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                stocks = f.read().splitlines()
+            
+            st.info(f"📂 Analyzing {len(stocks)} stocks... Please wait.")
+            progress_bar = st.progress(0)
+            results = []
+            
+            for i, s in enumerate(stocks):
+                s = s.strip()
+                if s:
+                    ticker = s if s.endswith(".NS") else f"{s}.NS"
+                    res = analyze_stock(ticker)
+                    if res: results.append(res)
+                
+                progress_bar.progress((i + 1) / len(stocks))
+            
+            if results:
+                df_results = pd.DataFrame(results)
+                st.subheader("📈 Trading Signals (Live)")
+                
+                # --- SORTING LOGIC: BUY 1st, SELL 2nd, HOLD 3rd ---
+                sort_order = {"✅ BUY": 1, "❌ SELL": 2, "⏳ HOLD": 3}
+                df_results['Sort'] = df_results['SIGNAL'].map(sort_order)
+                df_results = df_results.sort_values('Sort').drop('Sort', axis=1).reset_index(drop=True)
+                
+                # --- APPLY STYLING & PRECISION ---
+                styled_df = df_results.style.format(precision=2).map(color_signal, subset=['SIGNAL'])
+                st.dataframe(styled_df, use_container_width=True)
+                
+                st.success("✅ Analysis Complete!")
+            else:
+                st.warning("⚠️ Koi valid data nahi mila. Watchlist check karein.")
+        except FileNotFoundError:
+            st.error(f"❌ '{WATCHLIST_FILE}' file nahi mili! Dhyan rahe ye GitHub repo me ho.")
+
+
+# --- TAB 2: NEW 50 & 200 EMA CROSSOVER STRATEGY ---
+with tab2:
+    st.markdown("---")
+    st.subheader("📈 Strategy 2 Scanner: 50 & 200 EMA Crossover")
+    
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        selected_timeframe = st.selectbox("Select Timeframe:", ["1 Day", "4 Hrs"], key="tf_ema_box")
+
+    with col2:
+        st.write("") 
+        st.write("")
+        with st.form(key='scan_form_ema'):
+            start_scan_ema = st.form_submit_button(label='🚀 Start EMA Scanning')
+
+    if start_scan_ema:
+        watchlist_ema = load_watchlist_ema()
+        
+        if not watchlist_ema:
+            st.warning("Watchlist empty hai ya read nahi ho payi. ('pinshutrade.txt' file check karein)")
         else:
-             cols[i].metric(label=name, value="Error", delta=None)
-             continue
-        
-        change_pct = ((today_close - yest_close) / yest_close) * 100 if yest_close > 0 else 0
-        cols[i].metric(label=name, value=f"{today_close:.2f}", delta=f"{change_pct:.2f}%")
-    except:
-        cols[i].metric(label=name, value="Error", delta=None)
-
-st.markdown("---")
-
-# --- 3. AUTO-SCAN & MANUAL SCAN LOGIC ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Scan Settings")
-
-params = st.query_params
-default_auto = True if params.get("auto") == "true" else False
-
-auto_refresh = st.sidebar.checkbox("⏰ Auto-Scan Mode (Har 1 ghante mein chalega)", value=default_auto)
-
-start_scan = False
-
-if auto_refresh:
-    st.query_params["auto"] = "true"
-    st.markdown("<meta http-equiv='refresh' content='3600'>", unsafe_allow_html=True)
-    st.info("⏰ Auto-Scan Mode ON: Tool khud har 1 ghante mein scan karke Telegram alert bhejega. (Browser tab khula rakhein)")
-    start_scan = True  
-else:
-    if "auto" in st.query_params:
-        del st.query_params["auto"]
-    start_scan = st.button("🔄 Start Market Scan (Manual)")
-
-# --- MARKET SCANNER ---
-if start_scan:
-    try:
-        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-            stocks = f.read().splitlines()
-        
-        st.info(f"📂 Analyzing {len(stocks)} stocks... Please wait.")
-        progress_bar = st.progress(0)
-        results = []
-        
-        for i, s in enumerate(stocks):
-            s = s.strip()
-            if s:
-                ticker = s if s.endswith(".NS") else f"{s}.NS"
-                res = analyze_stock(ticker)
-                if res: results.append(res)
+            st.info(f"Scanning {len(watchlist_ema)} stocks on {selected_timeframe} timeframe... (1 sec per stock delay applied)")
+            progress_bar_ema = st.progress(0)
+            status_text_ema = st.empty()
             
-            progress_bar.progress((i + 1) / len(stocks))
-        
-        if results:
-            df_results = pd.DataFrame(results)
-            st.subheader("📈 Trading Signals (Live)")
+            signals_ema = []
+            serial_no = 1
             
-            # --- SORTING LOGIC: BUY 1st, SELL 2nd, HOLD 3rd ---
-            sort_order = {"✅ BUY": 1, "❌ SELL": 2, "⏳ HOLD": 3}
-            df_results['Sort'] = df_results['SIGNAL'].map(sort_order)
-            df_results = df_results.sort_values('Sort').drop('Sort', axis=1).reset_index(drop=True)
+            for i, symbol in enumerate(watchlist_ema):
+                status_text_ema.text(f"Scanning: {symbol} ({i+1}/{len(watchlist_ema)})")
+                
+                result = analyze_stock_ema(symbol, selected_timeframe)
+                
+                if result:
+                    final_row = {"S.No": serial_no, "Stock Name": symbol}
+                    final_row.update(result)
+                    signals_ema.append(final_row)
+                    serial_no += 1
+                    
+                time.sleep(1)
+                progress_bar_ema.progress((i + 1) / len(watchlist_ema))
+                
+            status_text_ema.text("Scanning Complete! ✅")
             
-            # --- APPLY STYLING & PRECISION ---
-            styled_df = df_results.style.format(precision=2).map(color_signal, subset=['SIGNAL'])
-            st.dataframe(styled_df, use_container_width=True)
-            
-            st.success("✅ Analysis Complete!")
-        else:
-            st.warning("⚠️ Koi valid data nahi mila. Watchlist check karein.")
-    except FileNotFoundError:
-        st.error(f"❌ '{WATCHLIST_FILE}' file nahi mili! Dhyan rahe ye GitHub repo me ho.")
+            if signals_ema:
+                df_results_ema = pd.DataFrame(signals_ema)
+                st.success(f"🎉 Found {len(df_results_ema)} stocks with a BUY signal!")
+                
+                styled_df_ema = df_results_ema.style.map(highlight_table_ema)
+                st.dataframe(styled_df_ema, use_container_width=True, hide_index=True)
+                
+                csv_ema = df_results_ema.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Results as CSV",
+                    data=csv_ema,
+                    file_name=f'EMA_Swing_Signals_{datetime.date.today()}.csv',
+                    mime='text/csv',
+                    key='dl_ema_btn'
+                )
+            else:
+                st.warning("Koi aaisa stock nahi mila jisme last 5 din me 50 & 200 EMA crossover hua ho.")
