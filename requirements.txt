@@ -3,4 +3,4 @@ yfinance
 pandas
 requests
 numpy
-pandas-ta
+pandas_ta
