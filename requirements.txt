@@ -2,11 +2,5 @@ streamlit
 yfinance
 pandas
 requests
-pyotp
-smartapi-python
-logzero
-websocket-client
+numpy
 pandas_ta
-
-
-
