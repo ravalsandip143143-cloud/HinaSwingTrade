@@ -6,3 +6,7 @@ pyotp
 smartapi-python
 logzero
 websocket-client
+pandas_ta
+
+
+
