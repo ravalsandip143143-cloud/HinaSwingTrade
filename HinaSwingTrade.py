@@ -209,7 +209,7 @@ def highlight_table_ema(val):
     return ''
     # --- 4. MAIN DASHBOARD & TAB 1 (HINA STRATEGY) ---
 st.title("🚀 Hina Swing Trade - AI Terminal")
-tab1, tab2 = st.tabs(["🚀 Hina Swing Strategy (Original)", "📈 50 & 200 EMA Crossover (Pinshu)"])
+tab1, tab2 = st.tabs(["🚀 Hina Swing Trade Strategy", "📈 Pinshu Swing Trade Strategy"])
 
 with tab1:
     st.markdown("---")
@@ -278,14 +278,14 @@ with tab1:
             # --- 5. TAB 2 (EMA CROSSOVER STRATEGY) ---
 with tab2:
     st.markdown("---")
-    st.subheader("📈 Strategy 2 Scanner: 50 & 200 EMA Crossover")
+    st.subheader("📈 Pinshu Swing Trade Strategy")
     
     col1, col2 = st.columns([1, 2])
     with col1: selected_timeframe = st.selectbox("Select Timeframe:", ["1 Day", "4 Hrs"], key="tf_ema_box")
     with col2:
         st.write("") 
         st.write("")
-        with st.form(key='scan_form_ema'): start_scan_ema = st.form_submit_button(label='🚀 Start EMA Scanning')
+        with st.form(key='scan_form_ema'): start_scan_ema = st.form_submit_button(label='🚀 Touch Pinshu Magic Botton')
 
     if start_scan_ema:
         watchlist_ema = load_watchlist_ema()
